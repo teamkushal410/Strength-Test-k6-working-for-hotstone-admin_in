@@ -1,0 +1,44 @@
+name: k6 Load & Stress Test - Hotstone Admin
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # Node.js 24 fix
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run k6 Test (Export JSON)
+        run: |
+          k6 run tests/hotstone-load.js \
+            --env BASE_URL=${{ secrets.BASE_URL }} \
+            --env EMAIL=${{ secrets.EMAIL }} \
+            --env PASSWORD=${{ secrets.PASSWORD }} \
+            --out json=report.json
+
+      - name: Setup Node.js (for HTML Report)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '24'
+
+      - name: Install k6 HTML Reporter
+        run: npm install -g k6-reporter
+
+      - name: Generate HTML Report
+        run: k6-reporter report.json --output report.html
+
+      - name: Upload HTML Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-html-report
+          path: report.html
