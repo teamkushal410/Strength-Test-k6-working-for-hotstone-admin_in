@@ -1,26 +1,18 @@
 name: Hotstone Admin Load Test
 
 on:
-  workflow_dispatch: # allows manual run
-  schedule:
-    - cron: '0 6 * * *' # optional: daily at 6 AM UTC
+  workflow_dispatch:
 
 jobs:
   load-test:
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 2️⃣ Set up k6
-      - name: Setup k6
-        uses: grafana/setup-k6-action@v1
+      - uses: grafana/setup-k6-action@v1
         with:
-          version: '0.46.0' # stable latest version
+          version: '0.46.0'
 
-      # 3️⃣ Run load test
       - name: Run k6 load test
         env:
           BASE_URL: ${{ secrets.BASE_URL }}
@@ -31,12 +23,9 @@ jobs:
           mkdir -p reports
           k6 run --out json=reports/report.json tests/hotstone-load.js
 
-      # 4️⃣ Generate HTML report
       - name: Generate HTML report
-        run: |
-          k6 report reports/report.json --out html=reports/report.html
+        run: k6 report reports/report.json --out html=reports/report.html
 
-      # 5️⃣ Upload report as artifact
       - name: Upload report
         uses: actions/upload-artifact@v3
         with:
