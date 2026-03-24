@@ -1,44 +1,44 @@
-name: k6 Load & Stress Test - Hotstone Admin
+name: Hotstone Admin Load Test
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+  workflow_dispatch: # allows manual run
+  schedule:
+    - cron: '0 6 * * *' # optional: daily at 6 AM UTC
 
 jobs:
   load-test:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # Node.js 24 fix
 
     steps:
-      - name: Checkout Code
+      # 1️⃣ Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2️⃣ Set up k6
       - name: Setup k6
         uses: grafana/setup-k6-action@v1
+        with:
+          version: '0.46.0' # stable latest version
 
-      - name: Run k6 Test (Export JSON)
+      # 3️⃣ Run load test
+      - name: Run k6 load test
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
         run: |
-          k6 run tests/hotstone-load.js \
-            --env BASE_URL=${{ secrets.BASE_URL }} \
-            --env EMAIL=${{ secrets.EMAIL }} \
-            --env PASSWORD=${{ secrets.PASSWORD }} \
-            --out json=report.json
+          mkdir -p reports
+          k6 run --out json=reports/report.json tests/hotstone-load.js
 
-      - name: Setup Node.js (for HTML Report)
-        uses: actions/setup-node@v3
+      # 4️⃣ Generate HTML report
+      - name: Generate HTML report
+        run: |
+          k6 report reports/report.json --out html=reports/report.html
+
+      # 5️⃣ Upload report as artifact
+      - name: Upload report
+        uses: actions/upload-artifact@v3
         with:
-          node-version: '24'
-
-      - name: Install k6 HTML Reporter
-        run: npm install -g k6-reporter
-
-      - name: Generate HTML Report
-        run: k6-reporter report.json --output report.html
-
-      - name: Upload HTML Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: k6-html-report
-          path: report.html
+          name: hotstone-load-report
+          path: reports/report.html
