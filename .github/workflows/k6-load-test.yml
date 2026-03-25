@@ -1,43 +1,49 @@
-name: K6 Load Tests
+name: K6 Load & Stress Tests
 
 on:
-  workflow_dispatch:   # manual run
+  workflow_dispatch:
   push:
-    branches: ["main"]   # auto run on push
+    branches: ['main']
   pull_request:
-    branches: ["main"]
+    branches: ['main']
 
 jobs:
   k6-tests:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
-      - name: Create results dir
+      - name: Debug files (optional)
+        run: ls -R
+
+      - name: Create results folder
         run: mkdir -p results
 
-      - name: Run test
+      - name: Run load test
         env:
           BASE_URL: ${{ secrets.BASE_URL }}
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
           RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
         run: |
-          k6 run --out json=results/result.json hotstone-load.js
+          k6 run --out json=results/loadtest.json tests/hotstone-load.js
 
-      - name: Generate HTML report
+      - name: Run stress test
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
         run: |
-          docker run --rm -v $PWD:/data \
-          ghcr.io/grafana/k6-reporter:latest \
-          /data/results/result.json > results/report.html
+          k6 run --vus 10 --duration 2m --out json=results/stresstest.json tests/hotstone-load.js
 
-      - name: Upload report
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: k6-html-report
-          path: results/report.html
+          name: k6-results
+          path: results/
