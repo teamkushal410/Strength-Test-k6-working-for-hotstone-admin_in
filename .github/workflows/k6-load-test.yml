@@ -1,12 +1,7 @@
-name: Hotstone Load Tests
+name: K6 Load Tests
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['main']
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   k6-tests:
@@ -16,34 +11,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup k6
+      - name: Install k6
         uses: grafana/setup-k6-action@v1
 
       - name: Create results dir
         run: mkdir -p results
 
-      # 🔥 Run Load Test
-      - name: Run Hotstone Load Test
+      - name: Run test
         env:
           BASE_URL: ${{ secrets.BASE_URL }}
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
           RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
         run: |
-          echo "Running k6 test..."
-          k6 run --out json=results/hotstone-load.json tests/hotstone-load.js || true
+          k6 run --out json=results/result.json hotstone-load.js
 
-      # 🧪 Debug: check files
-      - name: List results folder
+      # ✅ Convert JSON → HTML
+      - name: Generate HTML report
         run: |
-          echo "Checking results..."
-          ls -la results || true
+          docker run --rm -v $PWD:/data \
+          ghcr.io/grafana/k6-reporter:latest \
+          /data/results/result.json > results/report.html
 
-      # 📦 Upload only if exists
-      - name: Upload results artifact
-        if: always()
+      # ✅ Upload HTML
+      - name: Upload report
         uses: actions/upload-artifact@v4
         with:
-          name: k6-results
-          path: results/
-          if-no-files-found: warn
+          name: k6-html-report
+          path: results/report.html
