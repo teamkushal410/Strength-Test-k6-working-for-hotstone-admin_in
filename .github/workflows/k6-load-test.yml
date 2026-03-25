@@ -1,7 +1,11 @@
 name: K6 Load Tests
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # manual run
+  push:
+    branches: ["main"]   # auto run on push
+  pull_request:
+    branches: ["main"]
 
 jobs:
   k6-tests:
@@ -26,14 +30,12 @@ jobs:
         run: |
           k6 run --out json=results/result.json hotstone-load.js
 
-      # ✅ Convert JSON → HTML
       - name: Generate HTML report
         run: |
           docker run --rm -v $PWD:/data \
           ghcr.io/grafana/k6-reporter:latest \
           /data/results/result.json > results/report.html
 
-      # ✅ Upload HTML
       - name: Upload report
         uses: actions/upload-artifact@v4
         with:
