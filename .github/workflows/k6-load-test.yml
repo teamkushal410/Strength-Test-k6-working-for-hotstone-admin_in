@@ -15,11 +15,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js (for HTML report generation)
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
       - name: Setup k6
         uses: grafana/setup-k6-action@v1
 
       - name: Create results directory
         run: mkdir -p results
+
+      - name: Install k6-json-to-html
+        run: npm install -g k6-json-to-html
 
       - name: Run Load Test
         env:
@@ -30,7 +38,11 @@ jobs:
         run: |
           k6 run --out json=results/loadtest.json tests/hotstone-load.js
 
-      - name: Upload results artifact
+      - name: Generate HTML report
+        run: |
+          k6-json-to-html results/loadtest.json -o results/loadtest.html
+
+      - name: Upload results artifacts
         uses: actions/upload-artifact@v4
         with:
           name: k6-results
