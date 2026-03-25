@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: ['main']
-  pull_request:
-    branches: ['main']
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   k6-tests:
@@ -19,9 +20,9 @@ jobs:
         uses: grafana/setup-k6-action@v1
 
       - name: Create results dir
-        run: mkdir -p results || true
+        run: mkdir -p results
 
-      # 🔐 Main Load Test (Admin Login + APIs)
+      # 🔥 Run Load Test
       - name: Run Hotstone Load Test
         env:
           BASE_URL: ${{ secrets.BASE_URL }}
@@ -29,29 +30,20 @@ jobs:
           PASSWORD: ${{ secrets.PASSWORD }}
           RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
         run: |
+          echo "Running k6 test..."
           k6 run --out json=results/hotstone-load.json tests/hotstone-load.js || true
 
-      # (Optional) Stress Test
-      - name: Run Stress Test
-        env:
-          BASE_URL: ${{ secrets.BASE_URL }}
+      # 🧪 Debug: check files
+      - name: List results folder
         run: |
-          if [ -f tests/stress.js ]; then
-            k6 run --out json=results/stress.json tests/stress.js || true
-          fi
+          echo "Checking results..."
+          ls -la results || true
 
-      # (Optional) Spike Test
-      - name: Run Spike Test
-        env:
-          BASE_URL: ${{ secrets.BASE_URL }}
-        run: |
-          if [ -f tests/spike.js ]; then
-            k6 run --out json=results/spike.json tests/spike.js || true
-          fi
-
-      # 📦 Upload all results (even if failed)
+      # 📦 Upload only if exists
       - name: Upload results artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: k6-results
           path: results/
+          if-no-files-found: warn
