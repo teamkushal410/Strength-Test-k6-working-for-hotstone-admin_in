@@ -1,49 +1,70 @@
-name: K6 Load & Stress Tests
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+import { Rate } from 'k6/metrics';
 
-on:
-  workflow_dispatch:
-  push:
-    branches: ['main']
-  pull_request:
-    branches: ['main']
+// Custom metric to track failed requests
+export let http_req_failed = new Rate('http_req_failed');
 
-jobs:
-  k6-tests:
-    runs-on: ubuntu-latest
+// Environment variables from GitHub secrets
+const BASE_URL = __ENV.BASE_URL; // https://apiloyalty.hotstonelondon.com/api
+const EMAIL = __ENV.EMAIL;       // admin@gmail.com
+const PASSWORD = __ENV.PASSWORD; // Password@1
+const RESTAURANT_ID = __ENV.RESTAURANT_ID; // your restaurant id
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+// Rate limit configuration: max 25 requests per minute (~1 request every 2.4s)
+const REQUEST_INTERVAL = 2.4; // seconds
 
-      - name: Install k6
-        uses: grafana/setup-k6-action@v1
+export function setup() {
+    // Admin login
+    const loginRes = http.post(`${BASE_URL}/auth/staff/login`, JSON.stringify({
+        email: EMAIL,
+        password: PASSWORD,
+    }), {
+        headers: { 'Content-Type': 'application/json' },
+    });
 
-      - name: Debug files (optional)
-        run: ls -R
+    // Ensure login succeeded
+    check(loginRes, {
+        'login succeeded': (res) => res.status === 200 || res.status === 201,
+    }) || (() => { throw new Error(`Login failed: ${loginRes.status} - ${loginRes.body}`) })();
 
-      - name: Create results folder
-        run: mkdir -p results
+    const authToken = loginRes.json('accessToken');
+    return { authToken };
+}
 
-      - name: Run load test
-        env:
-          BASE_URL: ${{ secrets.BASE_URL }}
-          EMAIL: ${{ secrets.EMAIL }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
-        run: |
-          k6 run --out json=results/loadtest.json tests/hotstone-load.js
+export default function (data) {
+    // 1. Fetch customer special offers
+    let resCustomer = http.get(`${BASE_URL}/special-offer/special-offer/customer`, {
+        headers: {
+            Authorization: `Bearer ${data.authToken}`,
+            'x-restaurant-id': RESTAURANT_ID,
+        },
+    });
+    check(resCustomer, {
+        'customer offers success': (r) => r.status === 200,
+    }) || http_req_failed.add(1);
 
-      - name: Run stress test
-        env:
-          BASE_URL: ${{ secrets.BASE_URL }}
-          EMAIL: ${{ secrets.EMAIL }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
-        run: |
-          k6 run --vus 10 --duration 2m --out json=results/stresstest.json tests/hotstone-load.js
+    sleep(REQUEST_INTERVAL);
 
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: k6-results
-          path: results/
+    // 2. Fetch all special offers
+    let resOffers = http.get(`${BASE_URL}/special-offer`, {
+        headers: {
+            Authorization: `Bearer ${data.authToken}`,
+        },
+    });
+    check(resOffers, {
+        'admin offers success': (r) => r.status === 200,
+    }) || http_req_failed.add(1);
+
+    sleep(REQUEST_INTERVAL);
+}
+
+// Options for load and stress testing
+export let options = {
+    vus: 1, // start with 1 virtual user, scale as needed
+    duration: '5m', // run for 5 minutes
+    thresholds: {
+        http_req_failed: ['rate<0.3'], // fail if >30% requests fail
+        http_req_duration: ['p(95)<2000'], // 95% requests under 2s
+    },
+};
