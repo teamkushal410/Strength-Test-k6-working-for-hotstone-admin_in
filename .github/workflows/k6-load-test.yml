@@ -1,31 +1,57 @@
-name: Load Test
+name: Hotstone Load Tests
 
 on:
   workflow_dispatch:
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
 
 jobs:
-  load-test:
+  k6-tests:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup k6
         uses: grafana/setup-k6-action@v1
-        with:
-          version: '1.6.1'
 
-      - name: Run k6 load test
+      - name: Create results dir
+        run: mkdir -p results || true
+
+      # 🔐 Main Load Test (Admin Login + APIs)
+      - name: Run Hotstone Load Test
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          RESTAURANT_ID: ${{ secrets.RESTAURANT_ID }}
         run: |
-          mkdir -p reports
-          k6 run --out json=reports/report.json tests/hotstone-load.js
+          k6 run --out json=results/hotstone-load.json tests/hotstone-load.js || true
 
-      - name: Generate HTML report
+      # (Optional) Stress Test
+      - name: Run Stress Test
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
         run: |
-          k6 html reports/report.json -o reports/report.html
+          if [ -f tests/stress.js ]; then
+            k6 run --out json=results/stress.json tests/stress.js || true
+          fi
 
-      - name: Upload report
-        uses: actions/upload-artifact@v3
+      # (Optional) Spike Test
+      - name: Run Spike Test
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+        run: |
+          if [ -f tests/spike.js ]; then
+            k6 run --out json=results/spike.json tests/spike.js || true
+          fi
+
+      # 📦 Upload all results (even if failed)
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: k6-report
-          path: reports/report.html
+          name: k6-results
+          path: results/
