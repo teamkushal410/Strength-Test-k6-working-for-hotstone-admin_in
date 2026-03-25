@@ -1,63 +1,51 @@
 import http from 'k6/http';
-import { sleep, check } from 'k6';
-
-const BASE_URL = __ENV.BASE_URL;
-const EMAIL = __ENV.EMAIL;
-const PASSWORD = __ENV.PASSWORD;
-const RESTAURANT_ID = __ENV.RESTAURANT_ID;
+import { check, sleep } from 'k6';
 
 export const options = {
-  vus: 1,
-  duration: '5m',
-  thresholds: {
-    http_req_duration: ['p(95)<2000'],
-    http_req_failed: ['rate<0.30'],
-  },
+    vus: 5, // adjust number of virtual users
+    duration: '5m', // test duration
+    thresholds: {
+        http_req_failed: ['rate<0.3'], // 30% allowed to fail
+        http_req_duration: ['p(95)<2000'],
+    },
 };
 
+const ADMINS = [
+    { email: 'kushalniraula41@gmail.com', password: 'Password@1' },
+    { email: 'footballover049@gmail.com', password: 'Password@1' },
+];
+
 export function setup() {
-  const res = http.post(
-    `${BASE_URL}/api/auth/staff/login`,
-    JSON.stringify({
-      email: EMAIL,
-      password: PASSWORD,
-    }),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    }
-  );
+    // Rotate admin login each VU
+    const admin = ADMINS[Math.floor(Math.random() * ADMINS.length)];
 
-  if (res.status !== 200 && res.status !== 201) {
-    throw new Error(`Login failed: ${res.status} - ${res.body}`);
-  }
+    const loginRes = http.post(`${__ENV.BASE_URL}/auth/staff/login`, JSON.stringify({
+        username: admin.email,
+        password: admin.password,
+    }), {
+        headers: { 'Content-Type': 'application/json' },
+    });
 
-  const body = JSON.parse(res.body);
+    check(loginRes, { 'login success': (r) => r.status === 201 });
 
-  return {
-    token: body.accessToken,
-  };
+    const authToken = loginRes.json('accessToken');
+    return { authToken };
 }
 
 export default function (data) {
-  const headers = {
-    Authorization: `Bearer ${data.token}`,
-    'x-restaurant-id': RESTAURANT_ID,
-  };
+    const headers = {
+        Authorization: `Bearer ${data.authToken}`,
+        'x-restaurant-id': __ENV.RESTAURANT_ID,
+    };
 
-  const res1 = http.get(`${BASE_URL}/api/special-offer`, { headers });
+    // customer offer
+    const res1 = http.get(`${__ENV.BASE_URL}/special-offer/special-offer/customer`, { headers });
+    check(res1, { 'customer offers success': (r) => r.status === 200 });
 
-  check(res1, {
-    'admin offers success': (r) => r.status === 200,
-  });
+    // admin offer
+    const res2 = http.get(`${__ENV.BASE_URL}/special-offer`, { headers });
+    check(res2, { 'admin offers success': (r) => r.status === 200 });
 
-  const res2 = http.get(
-    `${BASE_URL}/api/special-offer/special-offer/customer`,
-    { headers }
-  );
-
-  check(res2, {
-    'customer offers success': (r) => r.status === 200,
-  });
-
-  sleep(2.5); // ✅ prevents rate limit
+    // sleep to respect rate limit (25/min per user)
+    sleep(3); // ~20 requests/min per VU
 }
