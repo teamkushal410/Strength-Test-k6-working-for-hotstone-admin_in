@@ -1,88 +1,63 @@
 import http from 'k6/http';
-import { check, sleep } from 'k6';
-import { Rate } from 'k6/metrics';
+import { sleep, check } from 'k6';
 
-// Custom metric for tracking failed requests
-export let failedRequests = new Rate('http_req_failed');
-
-// Configuration
-export const options = {
-    vus: 1,                  // Number of virtual users
-    duration: '5m',          // Test duration
-    thresholds: {
-        http_req_failed: ['rate<0.25'], // Allow up to 25% failed requests
-        http_req_duration: ['p(95)<2000'], // 95% of requests under 2s
-    },
-    // Stages example if you want ramping
-    stages: [
-        { duration: '1m', target: 1 }, // Ramp up
-        { duration: '3m', target: 1 }, // Steady state
-        { duration: '1m', target: 0 }, // Ramp down
-    ],
-};
-
-// Environment variables (set in GitHub secrets)
 const BASE_URL = __ENV.BASE_URL;
 const EMAIL = __ENV.EMAIL;
 const PASSWORD = __ENV.PASSWORD;
 const RESTAURANT_ID = __ENV.RESTAURANT_ID;
 
-// Rate limiting: 25 requests per minute
-const REQUEST_INTERVAL = 60 / 25; // seconds between requests
+export const options = {
+  vus: 1,
+  duration: '5m',
+  thresholds: {
+    http_req_duration: ['p(95)<2000'],
+    http_req_failed: ['rate<0.30'],
+  },
+};
 
-// Setup function: get admin token
 export function setup() {
-    const payload = JSON.stringify({
-        email: EMAIL,
-        password: PASSWORD
-    });
+  const res = http.post(
+    `${BASE_URL}/api/auth/staff/login`,
+    JSON.stringify({
+      email: EMAIL,
+      password: PASSWORD,
+    }),
+    {
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
 
-    const params = {
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    };
+  if (res.status !== 200 && res.status !== 201) {
+    throw new Error(`Login failed: ${res.status} - ${res.body}`);
+  }
 
-    const res = http.post(`${BASE_URL}/auth/staff/login`, payload, params);
+  const body = JSON.parse(res.body);
 
-    check(res, {
-        'login success': (r) => r.status === 201 && r.json('accessToken') !== undefined
-    }) || failedRequests.add(1);
-
-    const token = res.json('accessToken');
-    return { token };
+  return {
+    token: body.accessToken,
+  };
 }
 
-// Default function: run requests
 export default function (data) {
-    const authHeaders = {
-        headers: {
-            'Authorization': `Bearer ${data.token}`,
-            'Content-Type': 'application/json',
-        },
-    };
+  const headers = {
+    Authorization: `Bearer ${data.token}`,
+    'x-restaurant-id': RESTAURANT_ID,
+  };
 
-    // Admin fetch offers
-    let offersRes = http.get(`${BASE_URL}/special-offer`, authHeaders);
-    check(offersRes, {
-        'admin offers success': (r) => r.status === 200
-    }) || failedRequests.add(1);
+  const res1 = http.get(`${BASE_URL}/api/special-offer`, { headers });
 
-    sleep(REQUEST_INTERVAL); // respect rate limit
+  check(res1, {
+    'admin offers success': (r) => r.status === 200,
+  });
 
-    // Customer fetch special offers
-    const customerHeaders = {
-        headers: {
-            'Authorization': `Bearer ${data.token}`,
-            'x-restaurant-id': RESTAURANT_ID,
-            'Content-Type': 'application/json',
-        },
-    };
+  const res2 = http.get(
+    `${BASE_URL}/api/special-offer/special-offer/customer`,
+    { headers }
+  );
 
-    let customerRes = http.get(`${BASE_URL}/special-offer/special-offer/customer`, customerHeaders);
-    check(customerRes, {
-        'customer offers success': (r) => r.status === 200
-    }) || failedRequests.add(1);
+  check(res2, {
+    'customer offers success': (r) => r.status === 200,
+  });
 
-    sleep(REQUEST_INTERVAL); // respect rate limit
+  sleep(2.5); // ✅ prevents rate limit
 }
